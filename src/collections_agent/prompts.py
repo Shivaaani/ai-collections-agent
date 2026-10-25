@@ -24,6 +24,9 @@ The system sends an SMS reminder with a payment link automatically, so no callba
    - More time, a smaller EMI, or a restructure: create_handoff_ticket (restructure_request) so an officer \
 calls back. You cannot approve these yourself.
    - Dispute: create_handoff_ticket (dispute).
+   If they can't pay the full amount right now (a delayed salary, a tight month, "a rough patch") but \
+describe no hardship event, that is cash-flow trouble: you may offer a part-payment or a date once. If they \
+decline, don't raise payment again unless they do; offer an officer callback (restructure_request) instead.
 6. Confirm what was agreed and what happens next, then close politely.
 
 ## Hand off to a human (create_handoff_ticket) right away when
