@@ -157,7 +157,8 @@ def log_promise_to_pay(session: Session, promised_date: str, amount: int) -> dic
 
 
 def create_handoff_ticket(session: Session, reason: str, summary: str, priority: str) -> dict:
-    """One ticket per conversation: later calls add their reason and summary to the open ticket."""
+    """One ticket per conversation. The first reason is the primary tag; reasons from later calls become
+    secondary tags, and their summaries are appended."""
     if reason not in HANDOFF_REASONS:
         raise ToolError(f"reason must be one of {HANDOFF_REASONS}.")
     if priority not in ("normal", "urgent"):
@@ -167,21 +168,29 @@ def create_handoff_ticket(session: Session, reason: str, summary: str, priority:
         ticket = {
             "type": "handoff",
             "ticket_id": f"HT-{_token(session.borrower.borrower_id, reason, session.now)}",
-            "reasons": [reason],
+            "primary_tag": reason,
+            "secondary_tags": [],
             "priority": priority,
             "summary": summary,
         }
         session.outcomes.append(ticket)
         status = "created"
     else:
-        if reason not in ticket["reasons"]:
-            ticket["reasons"].append(reason)
+        if reason != ticket["primary_tag"] and reason not in ticket["secondary_tags"]:
+            ticket["secondary_tags"].append(reason)
         if priority == "urgent":
             ticket["priority"] = "urgent"
         ticket["summary"] += f"\n[Update] {summary}"
         status = "updated_existing_ticket"
     eta = "within 2 hours" if ticket["priority"] == "urgent" else "within 1 business day"
-    return {"status": status, "ticket_id": ticket["ticket_id"], "priority": ticket["priority"], "human_follow_up": eta}
+    return {
+        "status": status,
+        "ticket_id": ticket["ticket_id"],
+        "primary_tag": ticket["primary_tag"],
+        "secondary_tags": ticket["secondary_tags"],
+        "priority": ticket["priority"],
+        "human_follow_up": eta,
+    }
 
 
 # --- Schemas sent to the model ----------------------------------------------
@@ -251,8 +260,9 @@ TOOL_SCHEMAS = [
             "Hand the conversation to a human collections officer. Use for disputes, hardship, distress, failed "
             "verification, settlement or waiver requests, restructure requests, callbacks, or when the borrower asks "
             "for a human. The summary is read by the officer: state the situation and what the borrower wants, "
-            "without repeating phone numbers, PAN or full account numbers. A conversation has one ticket; calling "
-            "again adds the new reason and summary to it."
+            "without repeating phone numbers, PAN or full account numbers. A conversation has one ticket: the first "
+            "call's reason is its primary tag, and calling again adds the new reason as a secondary tag and appends "
+            "the summary. Raise the ticket for the customer's main issue first."
         ),
         "strict": True,
         "input_schema": {

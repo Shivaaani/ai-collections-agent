@@ -95,7 +95,8 @@ def test_second_handoff_updates_the_same_ticket(session):
     assert second["ticket_id"] == first["ticket_id"] and second["status"] == "updated_existing_ticket"
     tickets = [o for o in session.outcomes if o["type"] == "handoff"]
     assert len(tickets) == 1
-    assert tickets[0]["reasons"] == ["hardship", "distress"] and tickets[0]["priority"] == "urgent"
+    assert tickets[0]["primary_tag"] == "hardship" and tickets[0]["secondary_tags"] == ["distress"]
+    assert tickets[0]["priority"] == "urgent"
     assert second["human_follow_up"] == "within 2 hours"
 
 

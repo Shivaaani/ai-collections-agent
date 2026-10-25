@@ -67,13 +67,13 @@ def tokens(usages) -> dict:
 
 
 def outcome_labels(outcomes: list[dict]) -> list[str]:
-    labels = set()
-    for o in outcomes:
-        if o["type"] == "handoff":
-            labels |= {f"handoff:{reason}" for reason in o["reasons"]}
-        else:
-            labels.add(o["type"])
+    """Scored outcomes. A handoff counts by its primary tag; secondary tags are reported, not scored."""
+    labels = {f"handoff:{o['primary_tag']}" if o["type"] == "handoff" else o["type"] for o in outcomes}
     return sorted(labels) or ["none"]
+
+
+def secondary_tags(outcomes: list[dict]) -> list[str]:
+    return sorted({t for o in outcomes if o["type"] == "handoff" for t in o["secondary_tags"]})
 
 
 def pii_leaks(transcript: list[dict], borrower) -> list[str]:
@@ -119,6 +119,7 @@ def run_one(client, persona: dict, run: int) -> dict:
         "group": persona["group"],
         "run": run,
         "labels": labels,
+        "secondary_tags": secondary_tags(session.outcomes),
         "outcome_correct": set(labels) <= set(persona["acceptable_outcomes"]),
         "escalation": persona["escalation"],
         "escalated": escalated,
@@ -201,8 +202,8 @@ def write_report(out_dir: Path, results: list[dict], errors: list[dict], summary
         "",
         "## By persona",
         "",
-        "| Persona | Group | Correct runs | Outcomes seen | Critical | Tone |",
-        "|---|---|---|---|---|---|",
+        "| Persona | Group | Correct runs | Outcomes seen | Secondary tags | Critical | Tone |",
+        "|---|---|---|---|---|---|---|",
     ]
     by_persona = defaultdict(list)
     for r in results:
@@ -212,7 +213,8 @@ def write_report(out_dir: Path, results: list[dict], errors: list[dict], summary
         seen = sorted({", ".join(r["labels"]) for r in rs})
         lines.append(
             f"| {pid} | {rs[0]['group']} | {sum(r['outcome_correct'] for r in rs)}/{len(rs)} | "
-            f"{'; '.join(seen)} | {sum(r['critical_failures'] for r in rs)} | "
+            f"{'; '.join(seen)} | {', '.join(sorted({t for r in rs for t in r['secondary_tags']})) or '-'} | "
+            f"{sum(r['critical_failures'] for r in rs)} | "
             f"{statistics.mean(r['judgement']['tone_score'] for r in rs):.1f} |"
         )
     failures = [r for r in results if not r["outcome_correct"] or r["critical_failures"]]
