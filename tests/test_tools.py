@@ -85,6 +85,20 @@ def test_handoff_allowed_without_verification(session):
     assert not is_error and result["ticket_id"].startswith("HT-")
 
 
+def test_second_handoff_updates_the_same_ticket(session):
+    first, _ = run_tool(
+        session, "create_handoff_ticket", {"reason": "hardship", "summary": "Lost job.", "priority": "normal"}
+    )
+    second, _ = run_tool(
+        session, "create_handoff_ticket", {"reason": "distress", "summary": "Very stressed.", "priority": "urgent"}
+    )
+    assert second["ticket_id"] == first["ticket_id"] and second["status"] == "updated_existing_ticket"
+    tickets = [o for o in session.outcomes if o["type"] == "handoff"]
+    assert len(tickets) == 1
+    assert tickets[0]["reasons"] == ["hardship", "distress"] and tickets[0]["priority"] == "urgent"
+    assert second["human_follow_up"] == "within 2 hours"
+
+
 def test_every_call_is_logged(session):
     run_tool(session, "get_dues", {})
     verify(session)

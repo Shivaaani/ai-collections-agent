@@ -146,19 +146,42 @@ def log_promise_to_pay(session: Session, promised_date: str, amount: int) -> dic
         "partial": amount < session.borrower.total_due,
     }
     session.outcomes.append(outcome)
-    return {"logged": True, "ptp_id": ptp_id, "date": when.isoformat(), "amount": amount}
+    reminder = "on the morning of the promised date" if when == session.today else "the day before and on the day"
+    return {
+        "logged": True,
+        "ptp_id": ptp_id,
+        "date": when.isoformat(),
+        "amount": amount,
+        "sms_reminder": f"Sent automatically {reminder}, with a payment link.",
+    }
 
 
 def create_handoff_ticket(session: Session, reason: str, summary: str, priority: str) -> dict:
+    """One ticket per conversation: later calls add their reason and summary to the open ticket."""
     if reason not in HANDOFF_REASONS:
         raise ToolError(f"reason must be one of {HANDOFF_REASONS}.")
     if priority not in ("normal", "urgent"):
         raise ToolError("priority must be 'normal' or 'urgent'.")
-    ticket_id = f"HT-{_token(session.borrower.borrower_id, reason, session.now, len(session.outcomes))}"
-    outcome = {"type": "handoff", "ticket_id": ticket_id, "reason": reason, "priority": priority, "summary": summary}
-    session.outcomes.append(outcome)
-    eta = "within 2 hours" if priority == "urgent" else "within 1 business day"
-    return {"created": True, "ticket_id": ticket_id, "human_follow_up": eta}
+    ticket = next((o for o in session.outcomes if o["type"] == "handoff"), None)
+    if ticket is None:
+        ticket = {
+            "type": "handoff",
+            "ticket_id": f"HT-{_token(session.borrower.borrower_id, reason, session.now)}",
+            "reasons": [reason],
+            "priority": priority,
+            "summary": summary,
+        }
+        session.outcomes.append(ticket)
+        status = "created"
+    else:
+        if reason not in ticket["reasons"]:
+            ticket["reasons"].append(reason)
+        if priority == "urgent":
+            ticket["priority"] = "urgent"
+        ticket["summary"] += f"\n[Update] {summary}"
+        status = "updated_existing_ticket"
+    eta = "within 2 hours" if ticket["priority"] == "urgent" else "within 1 business day"
+    return {"status": status, "ticket_id": ticket["ticket_id"], "priority": ticket["priority"], "human_follow_up": eta}
 
 
 # --- Schemas sent to the model ----------------------------------------------
@@ -228,7 +251,8 @@ TOOL_SCHEMAS = [
             "Hand the conversation to a human collections officer. Use for disputes, hardship, distress, failed "
             "verification, settlement or waiver requests, restructure requests, callbacks, or when the borrower asks "
             "for a human. The summary is read by the officer: state the situation and what the borrower wants, "
-            "without repeating phone numbers, PAN or full account numbers."
+            "without repeating phone numbers, PAN or full account numbers. A conversation has one ticket; calling "
+            "again adds the new reason and summary to it."
         ),
         "strict": True,
         "input_schema": {

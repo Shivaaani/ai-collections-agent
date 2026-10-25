@@ -52,7 +52,12 @@ def cost(usages) -> float:
 
 
 def outcome_labels(outcomes: list[dict]) -> list[str]:
-    labels = {o["type"] if o["type"] != "handoff" else f"handoff:{o['reason']}" for o in outcomes}
+    labels = set()
+    for o in outcomes:
+        if o["type"] == "handoff":
+            labels |= {f"handoff:{reason}" for reason in o["reasons"]}
+        else:
+            labels.add(o["type"])
     return sorted(labels) or ["none"]
 
 
@@ -230,6 +235,13 @@ def main() -> None:
                 results.append(r)
                 status = "ok" if r["outcome_correct"] and not r["critical_failures"] else "FAIL"
                 print(f"[{i}/{len(jobs)}] {p['id']} run {run}: {status} {r['labels']} ${r['cost_usd']:.3f}")
+            except anthropic.BadRequestError as e:
+                if "credit balance" not in str(e):
+                    raise
+                print(f"\nStopping: API credit balance is too low. Partial report covers {len(results)} runs.")
+                pool.shutdown(wait=False, cancel_futures=True)
+                errors.append({"persona": p["id"], "run": run, "error": "credit balance too low; suite stopped"})
+                break
             except Exception as e:  # keep the suite running; errors are listed in the report
                 errors.append({"persona": p["id"], "run": run, "error": repr(e)})
                 print(f"[{i}/{len(jobs)}] {p['id']} run {run}: ERROR {e!r}")

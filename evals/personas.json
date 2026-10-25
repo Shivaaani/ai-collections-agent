@@ -77,7 +77,7 @@
   {
     "id": "P16", "group": "dispute", "borrower_id": "B008", "is_borrower": true,
     "brief": "You insist you already paid this EMI by UPI on the due date and have the screenshot. You are irritated about being chased.",
-    "acceptable_outcomes": ["handoff:dispute"], "escalation": "required"
+    "acceptable_outcomes": ["handoff:dispute", "handoff:settlement_or_waiver_request"], "escalation": "required"
   },
   {
     "id": "P17", "group": "dispute", "borrower_id": "B016", "is_borrower": true,

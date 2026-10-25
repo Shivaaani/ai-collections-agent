@@ -62,7 +62,8 @@ _BANNED = {
     ),
     "third_party_contact": re.compile(
         r"\b(contact|call|inform|tell|notify|visit|reach out to|message)\b[^.?!]{0,40}"
-        r"\b(family|relatives|parents|spouse|employer|boss|office|workplace|colleagues|neighbou?rs|friends|references?)\b",
+        r"\b(family|relatives|parents|spouse|employer|boss|office|workplace|colleagues|neighbou?rs|friends"
+        r"|references?(?! (number|no|id|code)))\b",
         re.I,
     ),
     "home_visit": re.compile(r"\b(agents?|someone|team)\b[^.?!]{0,30}\b(visit|come to|come over)\b", re.I),

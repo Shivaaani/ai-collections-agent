@@ -36,6 +36,7 @@ def test_redaction():
     [
         ("If you don't pay we will take legal action.", "legal_threat"),
         ("We may have to inform your employer about this.", "third_party_contact"),
+        ("We will call your references today.", "third_party_contact"),
         ("Our agents will visit your home tomorrow.", "home_visit"),
         ("This is irresponsible behaviour.", "shaming"),
         ("Not paying will ruin your CIBIL score.", "credit_threat"),
@@ -52,6 +53,7 @@ def test_outbound_filter_blocks(text, category):
         "I'm so sorry to hear about the loss in your family. I'll ask an officer to call you back.",
         "Your overdue amount is Rs 7,376, due on 2 October. What got in the way of the payment?",
         "I've sent a payment link for Rs 7,376 by SMS. It is valid for 24 hours.",
+        "A Sahyog officer will call you within 1 business day, and your reference number is HT-6c8496f4fc.",
     ],
 )
 def test_outbound_filter_allows_normal_messages(text):
