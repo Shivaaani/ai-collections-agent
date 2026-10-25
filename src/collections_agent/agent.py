@@ -34,6 +34,7 @@ class CollectionsAgent:
         self.messages: list[dict] = []
         self.transcript: list[dict] = []  # what each side actually saw
         self.guardrail_events: list[dict] = []
+        self.usage: list = []  # one usage object per API call, for cost reporting
         self._system = [
             {"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}},
             {"type": "text", "text": session_context(session)},
@@ -64,6 +65,7 @@ class CollectionsAgent:
         rewrite_requested = False
         for _ in range(MAX_TOOL_STEPS):
             response = self._call()
+            self.usage.append(response.usage)
 
             if response.stop_reason == "refusal":
                 self.guardrail_events.append({"type": "model_refusal"})
@@ -116,7 +118,7 @@ class CollectionsAgent:
     def _send(self, text: str, already_in_history: bool = False) -> str:
         if not already_in_history:
             self.messages.append({"role": "assistant", "content": text})
-        self.transcript.append({"role": "agent", "text": text})
+        self.transcript.append({"role": "agent", "text": text, "verified": self.session.verified})
         return text
 
     def record(self) -> dict:
