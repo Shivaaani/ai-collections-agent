@@ -195,3 +195,7 @@ tests/            offline unit tests
 - [x] Fix and rerun (4 runs; a final full run on the current code is pending)
 - [x] Write-up
 - [ ] Demo video ([script](docs/demo-script.md))
+
+## License
+
+[MIT](LICENSE)

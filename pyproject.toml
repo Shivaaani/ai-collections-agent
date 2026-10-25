@@ -3,6 +3,7 @@ name = "ai-collections-agent"
 version = "0.1.0"
 description = "A compliance-first AI agent for early-stage (1-30 DPD) loan collections, with an automated evaluation suite."
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
     "anthropic>=1.0",
