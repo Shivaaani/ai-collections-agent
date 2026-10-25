@@ -6,7 +6,8 @@ from typing import Literal
 import anthropic
 from pydantic import BaseModel
 
-from collections_agent.config import JUDGE_MODEL
+from collections_agent import llm_cli
+from collections_agent.config import JUDGE_MODEL, MODEL_BACKEND
 
 CriticalRule = Literal[
     "threat_or_pressure",
@@ -79,11 +80,17 @@ def judge(client: anthropic.Anthropic, persona: dict, record: dict, model: str =
         "tool_calls": record["tool_log"],
         "outcomes": record["outcomes"],
     }
+    content = json.dumps(payload, indent=1, ensure_ascii=False)
+    if MODEL_BACKEND == "claude-cli":
+        verdict, usage = llm_cli.complete(
+            JUDGE_SYSTEM, content, model, effort="medium", json_schema=Judgement.model_json_schema()
+        )
+        return Judgement.model_validate(verdict), usage
     response = client.messages.parse(
         model=model,
         max_tokens=16000,
         system=JUDGE_SYSTEM,
-        messages=[{"role": "user", "content": json.dumps(payload, indent=1, ensure_ascii=False)}],
+        messages=[{"role": "user", "content": content}],
         output_config={"effort": "medium"},
         output_format=Judgement,
     )

@@ -2,6 +2,7 @@
 
     python evals/run_eval.py                       # all 25 personas x 3 runs
     python evals/run_eval.py --personas P01,P19 --runs 1
+    MODEL_BACKEND=claude-cli python evals/run_eval.py --max-tokens 500000   # on a Claude subscription
 """
 
 import argparse
@@ -16,9 +17,11 @@ from zoneinfo import ZoneInfo
 
 import anthropic
 
-from collections_agent.agent import CollectionsAgent
+from collections_agent.agent import make_agent
+from collections_agent.config import MODEL_BACKEND
 from collections_agent.guardrails import check_outbound
 from collections_agent.ledger import Ledger
+from collections_agent.llm_cli import UsageLimitReached
 from collections_agent.tools import Session
 from judge import judge
 from simulator import END, BorrowerSimulator
@@ -51,6 +54,18 @@ def cost(usages) -> float:
     return total / 1_000_000
 
 
+def tokens(usages) -> dict:
+    """Input tokens (including cached) and output tokens, as counted against usage limits."""
+    return {
+        "input": sum(
+            u.input_tokens + (getattr(u, "cache_read_input_tokens", 0) or 0)
+            + (getattr(u, "cache_creation_input_tokens", 0) or 0)
+            for u in usages
+        ),
+        "output": sum(u.output_tokens for u in usages),
+    }
+
+
 def outcome_labels(outcomes: list[dict]) -> list[str]:
     labels = set()
     for o in outcomes:
@@ -76,7 +91,7 @@ def pii_leaks(transcript: list[dict], borrower) -> list[str]:
 def run_one(client, persona: dict, run: int) -> dict:
     borrower = Ledger().get(persona["borrower_id"])
     session = Session(borrower=borrower, now=datetime(*EVAL_DATE, tzinfo=ZoneInfo(borrower.timezone)))
-    agent = CollectionsAgent(session, client=client)
+    agent = make_agent(session, client=client)
     sim = BorrowerSimulator(client, persona, session)
 
     turns_to_outcome = None
@@ -114,6 +129,11 @@ def run_one(client, persona: dict, run: int) -> dict:
         "judgement": verdict.model_dump(),
         "critical_failures": len(verdict.critical_violations) + len(leaks) + len(sent_violations),
         "cost_usd": round(cost(agent.usage + sim.usage + [judge_usage]), 4),
+        "tokens": {
+            "agent": tokens(agent.usage),
+            "simulator": tokens(sim.usage),
+            "judge": tokens([judge_usage]),
+        },
         "record": record,
     }
 
@@ -159,7 +179,9 @@ def write_report(out_dir: Path, results: list[dict], errors: list[dict], summary
         "",
         f"**Verdict: {'PILOT-READY' if passed else 'NOT YET'}**. {len(results)} conversations "
         f"({len({r['persona'] for r in results})} personas x {runs} runs), "
-        f"cost ${sum(r['cost_usd'] for r in results):.2f}.",
+        f"backend `{MODEL_BACKEND}`, "
+        + (f"API cost ${sum(r['cost_usd'] for r in results):.2f}." if MODEL_BACKEND == "api"
+           else f"API-equivalent cost ${sum(r['cost_usd'] for r in results):.2f} (billed to the Claude subscription)."),
         "",
         "| Metric | Result | Threshold | Pass |",
         "|---|---|---|---|",
@@ -170,6 +192,12 @@ def write_report(out_dir: Path, results: list[dict], errors: list[dict], summary
         "",
         f"Opening disclosure present: {opening_ok}/{len(results)}. "
         f"Drafts blocked by the outbound filter (caught before sending): {blocked}.",
+        "",
+        "Tokens used: " + ", ".join(
+            f"{role} {sum(r['tokens'][role]['input'] for r in results):,} in / "
+            f"{sum(r['tokens'][role]['output'] for r in results):,} out"
+            for role in ("agent", "simulator", "judge")
+        ) + ".",
         "",
         "## By persona",
         "",
@@ -213,7 +241,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--personas", help="Comma-separated persona IDs (default: all)")
     parser.add_argument("--runs", type=int, default=3)
-    parser.add_argument("--workers", type=int, default=6)
+    parser.add_argument("--workers", type=int, default=6 if MODEL_BACKEND == "api" else 3)
+    parser.add_argument("--max-tokens", type=int, help="Stop starting new conversations once total tokens pass this")
     args = parser.parse_args()
 
     personas = json.loads((EVAL_DIR / "personas.json").read_text())
@@ -221,31 +250,53 @@ def main() -> None:
         wanted = set(args.personas.split(","))
         personas = [p for p in personas if p["id"] in wanted]
 
-    client = anthropic.Anthropic()
+    client = anthropic.Anthropic() if MODEL_BACKEND == "api" else None
     out_dir = EVAL_DIR / "reports" / datetime.now().strftime("%Y%m%d-%H%M%S")
     out_dir.mkdir(parents=True)
     results, errors = [], []
+    used = 0
     jobs = [(p, run) for p in personas for run in range(1, args.runs + 1)]
+    stop_reasons: list[str] = []
+
+    def stop(reason: str) -> None:
+        """Cancel queued conversations; ones already running finish and are kept."""
+        stop_reasons.append(reason)
+        for f in futures:
+            f.cancel()
+
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         futures = {pool.submit(run_one, client, p, run): (p, run) for p, run in jobs}
         for i, future in enumerate(as_completed(futures), 1):
             p, run = futures[future]
+            if future.cancelled():
+                continue
             try:
                 r = future.result()
-                results.append(r)
-                status = "ok" if r["outcome_correct"] and not r["critical_failures"] else "FAIL"
-                print(f"[{i}/{len(jobs)}] {p['id']} run {run}: {status} {r['labels']} ${r['cost_usd']:.3f}")
+            except UsageLimitReached as e:
+                errors.append({"persona": p["id"], "run": run, "error": f"subscription usage limit: {e}"})
+                stop("Claude subscription usage limit reached")
+                continue
             except anthropic.BadRequestError as e:
                 if "credit balance" not in str(e):
                     raise
-                print(f"\nStopping: API credit balance is too low. Partial report covers {len(results)} runs.")
-                pool.shutdown(wait=False, cancel_futures=True)
-                errors.append({"persona": p["id"], "run": run, "error": "credit balance too low; suite stopped"})
-                break
+                errors.append({"persona": p["id"], "run": run, "error": "API credit balance too low"})
+                stop("API credit balance too low")
+                continue
             except Exception as e:  # keep the suite running; errors are listed in the report
                 errors.append({"persona": p["id"], "run": run, "error": repr(e)})
                 print(f"[{i}/{len(jobs)}] {p['id']} run {run}: ERROR {e!r}")
                 traceback.print_exc()
+                continue
+            results.append(r)
+            status = "ok" if r["outcome_correct"] and not r["critical_failures"] else "FAIL"
+            n = sum(t["input"] + t["output"] for t in r["tokens"].values())
+            used += n
+            print(f"[{i}/{len(jobs)}] {p['id']} run {run}: {status} {r['labels']} {n:,} tokens (total {used:,})")
+            if args.max_tokens and used >= args.max_tokens:
+                stop(f"token cap {args.max_tokens:,} reached")
+    if stop_reasons:
+        print(f"\nStopped early: {stop_reasons[0]}. Report covers the {len(results)} finished conversations.")
+        errors.append({"persona": "-", "run": "-", "error": f"suite stopped early: {stop_reasons[0]}"})
 
     with (out_dir / "results.jsonl").open("w") as f:
         for r in sorted(results, key=lambda r: (r["persona"], r["run"])):

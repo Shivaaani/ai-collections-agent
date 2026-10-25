@@ -2,7 +2,8 @@
 
 import anthropic
 
-from collections_agent.config import SIMULATOR_MODEL
+from collections_agent import llm_cli
+from collections_agent.config import MODEL_BACKEND, SIMULATOR_MODEL
 from collections_agent.tools import Session
 
 END = "[END]"
@@ -53,6 +54,8 @@ class BorrowerSimulator:
 
     def respond(self, agent_text: str) -> str:
         self.messages.append({"role": "user", "content": agent_text})
+        if MODEL_BACKEND == "claude-cli":
+            return self._respond_cli()
         response = self.client.messages.create(
             model=self.model,
             max_tokens=4000,
@@ -65,3 +68,14 @@ class BorrowerSimulator:
             return END
         self.messages.append({"role": "assistant", "content": response.content})
         return "".join(b.text for b in response.content if b.type == "text").strip()
+
+    def _respond_cli(self) -> str:
+        chat = "\n".join(
+            f"{'SAHYOG BOT' if m['role'] == 'user' else 'YOU'}: {m['content']}" for m in self.messages
+        )
+        text, usage = llm_cli.complete(
+            self.system, f"## Chat so far\n{chat}\n\nWrite your next message.", self.model, effort="low"
+        )
+        self.usage.append(usage)
+        self.messages.append({"role": "assistant", "content": text})
+        return text

@@ -22,3 +22,7 @@ CONTACT_HOURS_END = 19    # 7 PM
 
 # Escalate after this many failed identity checks.
 MAX_VERIFICATION_ATTEMPTS = 2
+
+# "api" uses ANTHROPIC_API_KEY and API credits; "claude-cli" routes model calls through Claude Code
+# (`claude -p`) on your Claude subscription, for running evals without API credits.
+MODEL_BACKEND = os.getenv("MODEL_BACKEND", "api")

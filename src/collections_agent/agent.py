@@ -6,7 +6,8 @@ from pathlib import Path
 
 import anthropic
 
-from .config import AGENT_EFFORT, AGENT_MODEL
+from . import llm_cli
+from .config import AGENT_EFFORT, AGENT_MODEL, MODEL_BACKEND
 from .guardrails import check_outbound, redact_obj
 from .prompts import SYSTEM_PROMPT, session_context
 from .tools import TOOL_SCHEMAS, Session, run_tool
@@ -19,6 +20,22 @@ SAFE_FALLBACK = (
 )
 
 
+def _rewrite_note(violations: list[str]) -> str:
+    return (
+        "Your draft reply was blocked by the compliance filter"
+        + (f" ({', '.join(violations)})" if violations else " (empty reply)")
+        + ". Write a new reply to the customer that avoids threats, legal or police references, "
+        "mentions of contacting anyone else, shaming words, and credit-score claims."
+    )
+
+
+def make_agent(session: Session, client: anthropic.Anthropic | None = None, backend: str = MODEL_BACKEND):
+    """The agent for the configured backend: "api" (Anthropic API key) or "claude-cli" (Claude subscription)."""
+    if backend == "claude-cli":
+        return CliCollectionsAgent(session)
+    return CollectionsAgent(session, client=client or anthropic.Anthropic())
+
+
 class CollectionsAgent:
     def __init__(
         self,
@@ -28,7 +45,7 @@ class CollectionsAgent:
         effort: str = AGENT_EFFORT,
     ):
         self.session = session
-        self.client = client or anthropic.Anthropic()
+        self.client = client
         self.model = model
         self.effort = effort
         self.messages: list[dict] = []
@@ -50,6 +67,8 @@ class CollectionsAgent:
         return self._run_turn()
 
     def _call(self):
+        if self.client is None:
+            self.client = anthropic.Anthropic()
         return self.client.beta.messages.create(
             model=self.model,
             max_tokens=16000,
@@ -102,17 +121,7 @@ class CollectionsAgent:
             if rewrite_requested:
                 return self._send(SAFE_FALLBACK)
             rewrite_requested = True
-            self.messages.append(
-                {
-                    "role": "system",
-                    "content": (
-                        "Your draft reply was blocked by the compliance filter"
-                        + (f" ({', '.join(violations)})" if violations else " (empty reply)")
-                        + ". Write a new reply to the customer that avoids threats, legal or police references, "
-                        "mentions of contacting anyone else, shaming words, and credit-score claims."
-                    ),
-                }
-            )
+            self.messages.append({"role": "system", "content": _rewrite_note(violations)})
         raise RuntimeError("Agent exceeded the tool-step limit for one turn.")
 
     def _send(self, text: str, already_in_history: bool = False) -> str:
@@ -142,3 +151,90 @@ class CollectionsAgent:
         path = directory / f"{self.session.borrower.borrower_id}-{datetime.now():%Y%m%d-%H%M%S}.json"
         path.write_text(json.dumps(self.record(), indent=2, ensure_ascii=False) + "\n")
         return path
+
+
+_ACTION_PROTOCOL = """\
+## How you act
+You act one step at a time by returning a JSON action:
+- to use a tool: {{"action": "tool", "tool": "<tool name>", "input": {{...arguments...}}}}
+- to send a chat message to the customer: {{"action": "reply", "text": "<message>"}}
+After a tool action you see its result and act again. Use tools before replying whenever a reply depends \
+on them. The customer only sees your replies.
+
+## Tools
+{tools}"""
+
+_ACTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "action": {"type": "string", "enum": ["tool", "reply"]},
+        "tool": {"type": "string", "enum": [t["name"] for t in TOOL_SCHEMAS]},
+        "input": {"type": "object"},
+        "text": {"type": "string"},
+    },
+    "required": ["action"],
+    "additionalProperties": False,
+}
+
+
+class CliCollectionsAgent(CollectionsAgent):
+    """The same agent run through Claude Code on a Claude subscription.
+
+    Claude Code can't take our tools natively, so the model returns one JSON action per call and this loop
+    runs the tool. Tools, guardrails and the outbound filter are the same code as the API backend.
+    """
+
+    def __init__(self, session: Session, model: str = AGENT_MODEL, effort: str = AGENT_EFFORT):
+        super().__init__(session, client=None, model=model, effort=effort)
+        tools = "\n".join(
+            f"- {t['name']}: {t['description']} Arguments: {json.dumps(t['input_schema']['properties'])}"
+            for t in TOOL_SCHEMAS
+        )
+        self._cli_system = "\n\n".join(
+            [SYSTEM_PROMPT, session_context(session), _ACTION_PROTOCOL.format(tools=tools)]
+        )
+        self.events: list[str] = []  # the conversation as the model sees it, re-sent on every call
+
+    def start(self) -> str:
+        self.events.append(OPENING_NOTE)
+        return self._run_turn()
+
+    def reply(self, borrower_text: str) -> str:
+        self.transcript.append({"role": "borrower", "text": borrower_text})
+        self.events.append(f"CUSTOMER: {borrower_text}")
+        return self._run_turn()
+
+    def _run_turn(self) -> str:
+        rewrite_requested = False
+        for _ in range(MAX_TOOL_STEPS):
+            prompt = "## Conversation so far\n" + "\n".join(self.events) + "\n\nReturn your next action."
+            action, usage = llm_cli.complete(
+                self._cli_system, prompt, self.model, effort=self.effort, json_schema=_ACTION_SCHEMA
+            )
+            self.usage.append(usage)
+
+            if action.get("action") == "tool":
+                name, tool_input = action.get("tool", ""), action.get("input") or {}
+                if isinstance(tool_input, dict):
+                    result, is_error = run_tool(self.session, name, tool_input)
+                else:
+                    result, is_error = {"error": "input must be a JSON object"}, True
+                self.events.append(f"TOOL CALL {name} {json.dumps(tool_input)}")
+                self.events.append(f"TOOL {'ERROR' if is_error else 'RESULT'} {json.dumps(result)}")
+                continue
+
+            text = (action.get("text") or "").strip()
+            violations = check_outbound(text)
+            if text and not violations:
+                return self._send_cli(text)
+
+            self.guardrail_events.append({"type": "blocked_draft", "categories": violations, "draft": text})
+            if rewrite_requested:
+                return self._send_cli(SAFE_FALLBACK)
+            rewrite_requested = True
+            self.events.append(f"COMPLIANCE NOTE: {_rewrite_note(violations)}")
+        raise RuntimeError("Agent exceeded the tool-step limit for one turn.")
+
+    def _send_cli(self, text: str) -> str:
+        self.events.append(f"YOU: {text}")
+        return self._send(text, already_in_history=True)

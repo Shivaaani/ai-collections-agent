@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from .agent import CollectionsAgent
+from .agent import make_agent
 from .guardrails import OutsideContactHours, check_contact_hours
 from .ledger import Ledger
 from .tools import Session
@@ -32,7 +32,7 @@ def main() -> None:
     except OutsideContactHours as e:
         raise SystemExit(f"Not starting: {e}")
 
-    agent = CollectionsAgent(Session(borrower=borrower, now=now))
+    agent = make_agent(Session(borrower=borrower, now=now))
     print(f"Chatting as {borrower.name} ({borrower.borrower_id}). Your DOB is {borrower.dob}, "
           f"loan ID ends {borrower.loan_id[-4:]}. Type /quit to end.\n")
     print(f"Agent: {agent.start()}\n")
