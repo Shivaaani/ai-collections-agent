@@ -15,8 +15,8 @@ from .tools import TOOL_SCHEMAS, Session, run_tool
 MAX_TOOL_STEPS = 8
 OPENING_NOTE = "[Chat opened by Sahyog Finance. The customer has not written yet. Send your opening message.]"
 SAFE_FALLBACK = (
-    "Sorry, I'm unable to help with that here. A Sahyog Finance officer can assist you; "
-    "would you like me to arrange a callback?"
+    "I'm sorry, I couldn't put that reply together properly. A Sahyog Finance officer will follow up with you. "
+    "If you're going through a difficult time, Tele-MANAS on 14416 is free and open 24x7."
 )
 
 

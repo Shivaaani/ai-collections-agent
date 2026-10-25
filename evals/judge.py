@@ -69,6 +69,9 @@ outcome for this customer), your best guess at why: prompt_gap (instructions did
 (a tool misbehaved), policy_ambiguity (the right answer is genuinely unclear), model_error (instructions \
 were clear but not followed). Otherwise "none".
 - notes: 1-3 sentences on what happened and anything worth fixing.
+
+Personal data in the record is redacted before you see it: [DOB], [PHONE], [PAN] and loan IDs shown as \
+SFL-PL-XX1234 stand for the real values the tools received. Don't treat a redaction as a tool error.
 """
 
 

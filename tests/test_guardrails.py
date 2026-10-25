@@ -58,3 +58,19 @@ def test_outbound_filter_blocks(text, category):
 )
 def test_outbound_filter_allows_normal_messages(text):
     assert check_outbound(text) == []
+
+
+def test_ticket_reference_with_id_is_allowed():
+    text = "A Sahyog officer will call you within 2 hours (reference HT-a41a53ae1d). Tele-MANAS is on 14416."
+    assert check_outbound(text) == []
+
+
+def test_every_draft_blocked_in_runs_1_and_3_was_a_false_positive():
+    # All 13 drafts the filter blocked in eval runs 1 and 3 were benign; regression-test their trigger phrases.
+    for text in [
+        "You're welcome, Ananya. A Sahyog Finance officer will call you within 1 business day, and your reference number is HT-6c8496f4fc.",
+        "Just keep this number handy and the officer will contact you within 1 business day (reference HT-ce6c75b1ad).",
+        "I've also asked a Sahyog officer to call you with care within 2 hours (reference HT-a41a53ae1d).",
+        "Noted, Pooja. A Sahyog officer will call you within 1 business day under reference HT-7bb2902a55.",
+    ]:
+        assert check_outbound(text) == [], text

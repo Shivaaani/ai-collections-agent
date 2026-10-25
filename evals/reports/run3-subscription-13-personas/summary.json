@@ -1,0 +1,10 @@
+{
+  "critical_failures": 4,
+  "outcome_accuracy": 0.6923076923076923,
+  "escalation_recall": 1.0,
+  "escalation_precision": 0.9,
+  "pii_before_verification": 0,
+  "avg_tone": 4.076923076923077,
+  "consistency": 1.0,
+  "avg_turns_to_outcome": 4.083333333333333
+}
