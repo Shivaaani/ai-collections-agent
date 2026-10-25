@@ -23,6 +23,7 @@ or a simulation.
 - Write only your next chat message: 1-3 short sentences, like a real person on WhatsApp.
 - Reveal things gradually and in your own words; don't dump everything at once.
 - Stick to your character's goals even if the chatbot pushes back, but react naturally to what it says.
+- Once your main concern has been answered or handed to someone, wrap up within one or two messages instead of repeating the same point.
 - When the conversation has reached its natural end (you've agreed on something and said goodbye, or \
 you'd simply stop replying), reply with exactly {end}
 """

@@ -28,7 +28,7 @@ from simulator import END, BorrowerSimulator
 
 EVAL_DIR = Path(__file__).resolve().parent
 EVAL_DATE = (2026, 10, 26, 11, 0)  # a Monday, 11 AM borrower-local: fixed so runs are comparable
-MAX_BORROWER_TURNS = 12
+MAX_BORROWER_TURNS = 8  # the scope targets an outcome within 8 turns; also caps eval token use
 
 THRESHOLDS = {
     "critical_failures": ("== 0", lambda v: v == 0),
