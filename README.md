@@ -50,8 +50,8 @@ Mandatory escalation: disputes, hardship, distress, failed verification (2 attem
 Requires Python 3.11+ and an [Anthropic API key](https://console.anthropic.com/).
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv venv   # not ".venv": iCloud hides files in dot-folders, which breaks the editable install
+source venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env   # then add your ANTHROPIC_API_KEY
 ```
@@ -68,9 +68,18 @@ tests/                   unit tests for guardrails and tools
 ## Status
 
 - [x] Setup
-- [ ] Mock systems
-- [ ] Agent
+- [x] Mock systems
+- [x] Agent
 - [ ] Evals
 - [ ] Fix and rerun
 - [ ] Write-up
 - [ ] Demo
+
+## Try it
+
+```bash
+python -m collections_agent --borrower B001                       # chat as a borrower
+python -m collections_agent --borrower B020 --time 2026-10-26T21:00  # refused: outside contact hours
+```
+
+Redacted transcripts are saved to `logs/`.
